@@ -1,0 +1,8 @@
+[workspace]
+members = [
+  "app-btc",
+  "ledger",
+  "transport",
+  "transport-hid",
+  "transport-mock"
+]

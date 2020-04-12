@@ -1,0 +1,11 @@
+[package]
+name = "ledger-hw-transport-mock"
+version = "0.1.0"
+authors = ["Edouard Paris <m@edouard.paris>"]
+edition = "2018"
+
+[dependencies]
+async-trait = "0.1.24"
+hex = "0.4.2"
+ledger-hw-transport = { path = "../transport"}
+regex = "1.3.6"

@@ -1,0 +1,7 @@
+[package]
+name = "ledger-hw"
+version = "0.1.0"
+authors = ["Edouard Paris <m@edouard.paris>"]
+edition = "2018"
+
+[dependencies]
