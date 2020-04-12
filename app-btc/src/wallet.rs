@@ -9,6 +9,7 @@ use bitcoin::util::address::Address;
 use bitcoin::util::bip32::{ChainCode, ChildNumber, DerivationPath};
 use bitcoin::util::key::PublicKey;
 
+use ledger_hw::device::LEDGER_PACKET_SIZE;
 use ledger_hw::Status;
 use ledger_hw_transport::Transport;
 
@@ -152,14 +153,22 @@ pub async fn get_trusted_input<T: Transport + Sync>(
         let mut data: Vec<u8> = Vec::new();
         btc_encode(&output.value, &mut data)?;
         btc_encode(&VarInt(output.script_pubkey.len() as u64), &mut data)?;
+        let script = output.script_pubkey.as_bytes();
+        if script.len() + data.len() <= LEDGER_PACKET_SIZE {
+            data.extend(script);
+        }
         let (_, status) = transport
             .send(BTCHIP_CLA, BTCHIP_INS_GET_TRUSTED_INPUT, 0x80, 0x00, &data)
             .await
             .map_err(|e| AppError::Transport(e))?;
         check_status(status, Status::OK)?;
 
+        if script.len() + data.len() <= LEDGER_PACKET_SIZE {
+            continue;
+        }
+
         // exchange chunks of output script_pubkey bytes
-        for chunk in output.script_pubkey.as_bytes().chunks(MAX_SCRIPT_BLOCK) {
+        for chunk in script.chunks(MAX_SCRIPT_BLOCK) {
             let (_, status) = transport
                 .send(BTCHIP_CLA, BTCHIP_INS_GET_TRUSTED_INPUT, 0x80, 0x00, &chunk)
                 .await
@@ -389,9 +398,11 @@ pub async fn sign_message_sign<T: Transport + Sync>(
 mod tests {
     use std::str::FromStr;
 
+    use bitcoin::consensus::encode::deserialize;
     use futures_await_test::async_test;
 
-    use ledger_hw_transport_mock::{RecordStore, TransportReplayer};
+    use ledger_hw_transport::TransportError;
+    use ledger_hw_transport_mock::{MockError, RecordStore, TransportReplayer};
 
     use super::*;
     #[async_test]
@@ -448,5 +459,37 @@ mod tests {
                 .unwrap(),
             s
         );
+    }
+    #[async_test]
+    async fn test_get_trusted_input() {
+        let raw_tx = hex::decode("01000000014ea60aeac5252c14291d428915bd7ccd1bfc4af009f4d4dc57ae597ed0420b71010000008a47304402201f36a12c240dbf9e566bc04321050b1984cd6eaf6caee8f02bb0bfec08e3354b022012ee2aeadcbbfd1e92959f57c15c1c6debb757b798451b104665aa3010569b49014104090b15bde569386734abf2a2b99f9ca6a50656627e77de663ca7325702769986cf26cc9dd7fdea0af432c8e2becc867c932e1b9dd742f2a108997c2252e2bdebffffffff0281b72e00000000001976a91472a5d75c8d2d0565b656a5232703b167d50d5a2b88aca0860100000000001976a9144533f5fb9b4817f713c48f0bfe96b9f50c476c9b88ac00000000")
+            .expect("could not decode raw tx");
+        let tx: Transaction = deserialize(&raw_tx).expect("tx non valid");
+        let mock = TransportReplayer::new(
+            RecordStore::from_str("
+                => e042000009000000010100000001
+                <= 9000
+                => e0428000254ea60aeac5252c14291d428915bd7ccd1bfc4af009f4d4dc57ae597ed0420b71010000008a
+                <= 9000
+                => e04280003247304402201f36a12c240dbf9e566bc04321050b1984cd6eaf6caee8f02bb0bfec08e3354b022012ee2aeadcbbfd1e92959f
+                <= 9000
+                => e04280003257c15c1c6debb757b798451b104665aa3010569b49014104090b15bde569386734abf2a2b99f9ca6a50656627e77de663ca7
+                <= 9000
+                => e04280002a325702769986cf26cc9dd7fdea0af432c8e2becc867c932e1b9dd742f2a108997c2252e2bdebffffffff
+                <= 9000
+                => e04280000102
+                <= 9000
+                => e04280002281b72e00000000001976a91472a5d75c8d2d0565b656a5232703b167d50d5a2b88ac
+                <= 9000
+                => e042800022a0860100000000001976a9144533f5fb9b4817f713c48f0bfe96b9f50c476c9b88ac
+                <= 9000
+                => e04280000400000000
+                <= 32005df4c773da236484dae8f0fdba3d7e0ba1d05070d1a34fc44943e638441262a04f1001000000a086010000000000b890da969aa6f3109000
+            ",
+            )
+            .unwrap(),
+        );
+
+        let _res = get_trusted_input(&mock, tx, 1).await.unwrap();
     }
 }
