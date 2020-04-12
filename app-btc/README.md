@@ -1,4 +1,4 @@
-# Helpers for the Ledger Bitcoin application
+# Helpers for the Ledger Bitcoin application [WIP]
 
 ## mod wallet
 
