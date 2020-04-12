@@ -13,6 +13,12 @@
 - [ ] finalize_input
 - [ ] untrusted_hash_sign
 
+## mod setup
+
+- [ ] setup
+- [ ] set_keymap_encoding
+- [ ] verify_pin
+
 ## mod util
 
 - [x] get_firmware_version
