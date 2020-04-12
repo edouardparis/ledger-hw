@@ -401,8 +401,7 @@ mod tests {
     use bitcoin::consensus::encode::deserialize;
     use futures_await_test::async_test;
 
-    use ledger_hw_transport::TransportError;
-    use ledger_hw_transport_mock::{MockError, RecordStore, TransportReplayer};
+    use ledger_hw_transport_mock::{RecordStore, TransportReplayer};
 
     use super::*;
     #[async_test]
