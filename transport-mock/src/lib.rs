@@ -53,12 +53,12 @@ impl Transport for TransportReplayer {
                 return Ok(exchange.1.clone());
             }
         }
-        Err(MockError::ExchangeNotFound)
+        Err(MockError::ExchangeNotFound(command.to_vec()))
     }
 }
 
 #[derive(Debug)]
 pub enum MockError {
     ParseExchangeError,
-    ExchangeNotFound,
+    ExchangeNotFound(Vec<u8>),
 }
