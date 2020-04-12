@@ -6,14 +6,13 @@ use async_trait::async_trait;
 use byteorder::{BigEndian, ReadBytesExt};
 use hidapi::HidApi;
 
-use ledger_hw::device::{LEDGER_CHANNEL, LEDGER_USAGE_PAGE, LEDGER_VENDOR_ID};
+use ledger_hw::device::{LEDGER_CHANNEL, LEDGER_PACKET_SIZE, LEDGER_USAGE_PAGE, LEDGER_VENDOR_ID};
 use ledger_hw_transport::Transport;
 
 #[macro_use]
 extern crate nix;
 pub mod linux;
 
-const LEDGER_PACKET_SIZE: usize = 64;
 const LEDGER_TIMEOUT: i32 = 10_000_000;
 
 #[allow(dead_code)]
