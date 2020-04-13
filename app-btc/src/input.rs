@@ -18,7 +18,7 @@ pub enum Input {
         txin: TxIn,
         amount: u64,
     },
-    SegWit {
+    Segwit {
         txin: TxIn,
         amount: u64,
     },
@@ -50,7 +50,7 @@ impl Input {
         }
     }
     pub fn new_segwit(txin: TxIn, amount: u64) -> Input {
-        Input::Untrusted {
+        Input::Segwit {
             txin: txin,
             amount: amount,
         }
