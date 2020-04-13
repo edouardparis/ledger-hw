@@ -50,6 +50,12 @@ pub enum AddressFormat {
     Bech32,
 }
 
+#[derive(Debug)]
+pub struct InputSig {
+    pub magic: [u8; 4],
+    pub sig: [u8; 8],
+}
+
 // path a BIP 32 path
 // verify (boolean) will ask user to confirm the address on the device
 // format ("legacy" | "p2sh" | "bech32") to use different bitcoin address formatter
@@ -99,7 +105,7 @@ pub async fn get_trusted_input<T: Transport + Sync>(
     transport: &T,
     transaction: Transaction,
     index: usize,
-) -> Result<(OutPoint, u64, ([u8; 4], [u8; 8])), AppError<T::Err>> {
+) -> Result<(OutPoint, u64, InputSig), AppError<T::Err>> {
     // First Exchange:
     // - index    (4 bytes)
     // - version  (consensus)
@@ -191,9 +197,7 @@ pub async fn get_trusted_input<T: Transport + Sync>(
     ledger_decode_outpoint(&data).map_err(|e| AppError::ConsensusEncode(e))
 }
 
-pub fn ledger_decode_outpoint(
-    data: &[u8; 56],
-) -> Result<(OutPoint, u64, ([u8; 4], [u8; 8])), EncodeError> {
+pub fn ledger_decode_outpoint(data: &[u8; 56]) -> Result<(OutPoint, u64, InputSig), EncodeError> {
     let mut magic: [u8; 4] = [0; 4];
     magic.copy_from_slice(&data[0..4]);
     let mut vout: [u8; 4] = [0; 4];
@@ -206,7 +210,10 @@ pub fn ledger_decode_outpoint(
     Ok((
         OutPoint::new(txid, u32::from_le_bytes(vout)),
         u64::from_le_bytes(amt),
-        (magic, sig),
+        InputSig {
+            magic: magic,
+            sig: sig,
+        },
     ))
 }
 
@@ -238,7 +245,7 @@ impl Input {
 }
 
 // pub enum nInput {
-//     Trusted(TxIn, u64, Vec<u8>),
+//     Trusted(TxIn, u64, InputSig),
 //     Untrusted(TxIn, u64),
 // }
 
