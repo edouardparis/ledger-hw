@@ -20,40 +20,13 @@ use crate::constant::{
     BTCHIP_INS_SIGN_MESSAGE, MAX_SCRIPT_BLOCK,
 };
 use crate::error::AppError;
-
-fn btc_encode<T, W: Write, E: Encodable>(e: &E, w: W) -> Result<usize, AppError<T>> {
-    e.consensus_encode(w)
-        .map_err(|e| AppError::ConsensusEncode(e))
-}
-
-fn path_to_be_bytes(path: DerivationPath) -> Vec<u8> {
-    let child_numbers: Vec<ChildNumber> = path.into();
-    let p: Vec<u32> = child_numbers.iter().map(|&x| u32::from(x)).collect();
-    let mut data: Vec<u8> = vec![child_numbers.len() as u8];
-    for child_number in p {
-        data.extend(&child_number.to_be_bytes());
-    }
-    data
-}
-
-fn check_status<T>(actual: Status, expected: Status) -> Result<(), AppError<T>> {
-    if actual != expected {
-        return Err(AppError::ResponseStatus(actual));
-    }
-    Ok(())
-}
+use crate::input::DeviceSig;
 
 #[derive(Debug)]
 pub enum AddressFormat {
     Legacy,
     P2sh,
     Bech32,
-}
-
-#[derive(Debug)]
-pub struct InputSig {
-    pub magic: [u8; 4],
-    pub sig: [u8; 8],
 }
 
 // path a BIP 32 path
@@ -105,7 +78,7 @@ pub async fn get_trusted_input<T: Transport + Sync>(
     transport: &T,
     transaction: Transaction,
     index: usize,
-) -> Result<(OutPoint, u64, InputSig), AppError<T::Err>> {
+) -> Result<(OutPoint, u64, DeviceSig), AppError<T::Err>> {
     // First Exchange:
     // - index    (4 bytes)
     // - version  (consensus)
@@ -197,7 +170,7 @@ pub async fn get_trusted_input<T: Transport + Sync>(
     ledger_decode_outpoint(&data).map_err(|e| AppError::ConsensusEncode(e))
 }
 
-pub fn ledger_decode_outpoint(data: &[u8; 56]) -> Result<(OutPoint, u64, InputSig), EncodeError> {
+pub fn ledger_decode_outpoint(data: &[u8; 56]) -> Result<(OutPoint, u64, DeviceSig), EncodeError> {
     let mut magic: [u8; 4] = [0; 4];
     magic.copy_from_slice(&data[0..4]);
     let mut vout: [u8; 4] = [0; 4];
@@ -210,7 +183,7 @@ pub fn ledger_decode_outpoint(data: &[u8; 56]) -> Result<(OutPoint, u64, InputSi
     Ok((
         OutPoint::new(txid, u32::from_le_bytes(vout)),
         u64::from_le_bytes(amt),
-        InputSig {
+        DeviceSig {
             magic: magic,
             sig: sig,
         },
@@ -230,36 +203,26 @@ pub fn ledger_encode_trusted_outpoint(
     Ok(data)
 }
 
-pub enum Input {
+pub enum RawInput {
     Trusted(Vec<u8>),
     Untrusted(Vec<u8>),
 }
 
-impl Input {
+impl RawInput {
     pub fn as_slice(&self) -> &[u8] {
         return match self {
-            Input::Trusted(inp) => inp,
-            Input::Untrusted(inp) => inp,
+            RawInput::Trusted(inp) => inp,
+            RawInput::Untrusted(inp) => inp,
         };
     }
 }
-
-// pub enum nInput {
-//     Trusted(TxIn, u64, InputSig),
-//     Untrusted(TxIn, u64),
-// }
-
-// impl nInput {
-//     pub fn new(outpoint: OutPoint, script: Script, sequence: u32, witness: Vec<Vec<u8>>) -> nInput {
-//     }
-// }
 
 pub async fn start_untrusted_hash_transaction_input<T: Transport + Sync>(
     transport: &T,
     new_tx: bool,
     version: u32,
     input_idx: usize,
-    inputs: &[Input],
+    inputs: &[RawInput],
     redeem_script: Script,
     bip143: bool,
 ) -> Result<(), AppError<T::Err>> {
@@ -295,18 +258,18 @@ pub async fn start_untrusted_hash_transaction_input<T: Transport + Sync>(
             data.push(0x02);
         } else {
             match input {
-                Input::Trusted(_) => {
+                RawInput::Trusted(_) => {
                     data.push(0x01);
                 }
-                Input::Untrusted(_) => data.push(0x00),
+                RawInput::Untrusted(_) => data.push(0x00),
             }
         }
         match input {
-            Input::Trusted(tx) => {
+            RawInput::Trusted(tx) => {
                 data.push(tx.len() as u8);
                 data.extend(tx)
             }
-            Input::Untrusted(tx) => data.extend(tx),
+            RawInput::Untrusted(tx) => data.extend(tx),
         }
 
         if i == input_idx {
@@ -447,6 +410,28 @@ pub async fn sign_message_sign<T: Transport + Sync>(
     Ok((v, r.to_vec(), s.to_vec()))
 }
 
+fn btc_encode<T, W: Write, E: Encodable>(e: &E, w: W) -> Result<usize, AppError<T>> {
+    e.consensus_encode(w)
+        .map_err(|e| AppError::ConsensusEncode(e))
+}
+
+fn path_to_be_bytes(path: DerivationPath) -> Vec<u8> {
+    let child_numbers: Vec<ChildNumber> = path.into();
+    let p: Vec<u32> = child_numbers.iter().map(|&x| u32::from(x)).collect();
+    let mut data: Vec<u8> = vec![child_numbers.len() as u8];
+    for child_number in p {
+        data.extend(&child_number.to_be_bytes());
+    }
+    data
+}
+
+fn check_status<T>(actual: Status, expected: Status) -> Result<(), AppError<T>> {
+    if actual != expected {
+        return Err(AppError::ResponseStatus(actual));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -553,6 +538,6 @@ mod tests {
         );
         let amt: u64 = 100000;
         assert_eq!(amt, amount);
-        assert_eq!("b890da969aa6f310", hex::encode(&magic_sig.1));
+        assert_eq!("b890da969aa6f310", hex::encode(&magic_sig.sig));
     }
 }
