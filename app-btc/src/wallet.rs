@@ -575,19 +575,11 @@ mod tests {
         res.copy_from_slice(&trusted_input_exchange);
         let (outpoint, amount, magic_sig) = ledger_decode_outpoint(&res).unwrap();
 
-        println!(
-            "{}",
-            hex::encode(vec![
-                118, 169, 20, 69, 51, 245, 251, 155, 72, 23, 247, 19, 196, 143, 11, 254, 150, 185,
-                245, 12, 71, 108, 155, 136, 172
-            ])
-        );
-
-        println!(
-            "{:?}",
-            hex::decode("e04480001d76a9144533f5fb9b4817f713c48f0bfe96b9f50c476c9b88acffffffff")
-                .unwrap()
-        );
+        // println!(
+        //     "{:?}",
+        //     hex::decode("e04480001d76a9144533f5fb9b4817f713c48f0bfe96b9f50c476c9b88acffffffff")
+        //         .unwrap()
+        // );
 
         let input = Input::new_trusted(outpoint, script, 0, amount, magic_sig);
         let inputs: Vec<Input> = vec![input];
