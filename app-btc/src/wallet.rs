@@ -3,8 +3,9 @@ use std::marker::Sync;
 use std::str::{from_utf8, FromStr};
 
 use bitcoin::blockdata::script::Script;
-use bitcoin::blockdata::transaction::Transaction;
-use bitcoin::consensus::encode::{Encodable, VarInt};
+use bitcoin::blockdata::transaction::{OutPoint, Transaction};
+use bitcoin::consensus::encode::{deserialize, Encodable, Error as EncodeError, VarInt};
+use bitcoin::hash_types::Txid;
 use bitcoin::util::address::Address;
 use bitcoin::util::bip32::{ChainCode, ChildNumber, DerivationPath};
 use bitcoin::util::key::PublicKey;
@@ -98,7 +99,7 @@ pub async fn get_trusted_input<T: Transport + Sync>(
     transport: &T,
     transaction: Transaction,
     index: usize,
-) -> Result<Vec<u8>, AppError<T::Err>> {
+) -> Result<(OutPoint, u64, ([u8; 4], [u8; 8])), AppError<T::Err>> {
     // First Exchange:
     // - index    (4 bytes)
     // - version  (consensus)
@@ -184,7 +185,42 @@ pub async fn get_trusted_input<T: Transport + Sync>(
         .await
         .map_err(|e| AppError::Transport(e))?;
     check_status(status, Status::OK)?;
-    Ok(res)
+
+    let mut data: [u8; 56] = [0; 56];
+    data.copy_from_slice(&res);
+    ledger_decode_outpoint(&data).map_err(|e| AppError::ConsensusEncode(e))
+}
+
+pub fn ledger_decode_outpoint(
+    data: &[u8; 56],
+) -> Result<(OutPoint, u64, ([u8; 4], [u8; 8])), EncodeError> {
+    let mut magic: [u8; 4] = [0; 4];
+    magic.copy_from_slice(&data[0..4]);
+    let mut vout: [u8; 4] = [0; 4];
+    vout.copy_from_slice(&data[36..40]);
+    let txid: Txid = deserialize(&data[4..36])?;
+    let mut amt: [u8; 8] = [0; 8];
+    amt.copy_from_slice(&data[40..48]);
+    let mut sig: [u8; 8] = [0; 8];
+    sig.copy_from_slice(&data[48..56]);
+    Ok((
+        OutPoint::new(txid, u32::from_le_bytes(vout)),
+        u64::from_le_bytes(amt),
+        (magic, sig),
+    ))
+}
+
+pub fn ledger_encode_trusted_outpoint(
+    outpoint: &OutPoint,
+    amount: u64,
+    magic: &[u8; 4],
+    hmac_sig: &[u8; 8],
+) -> Result<Vec<u8>, EncodeError> {
+    let mut data: Vec<u8> = magic.to_vec();
+    outpoint.consensus_encode(&mut data)?;
+    data.extend(&(amount.to_le_bytes()));
+    data.extend(hmac_sig);
+    Ok(data)
 }
 
 pub enum Input {
@@ -200,6 +236,16 @@ impl Input {
         };
     }
 }
+
+// pub enum nInput {
+//     Trusted(TxIn, u64, Vec<u8>),
+//     Untrusted(TxIn, u64),
+// }
+
+// impl nInput {
+//     pub fn new(outpoint: OutPoint, script: Script, sequence: u32, witness: Vec<Vec<u8>>) -> nInput {
+//     }
+// }
 
 pub async fn start_untrusted_hash_transaction_input<T: Transport + Sync>(
     transport: &T,
@@ -399,6 +445,7 @@ mod tests {
     use std::str::FromStr;
 
     use bitcoin::consensus::encode::deserialize;
+    use bitcoin::hash_types::Txid;
     use futures_await_test::async_test;
 
     use ledger_hw_transport_mock::{RecordStore, TransportReplayer};
@@ -489,6 +536,16 @@ mod tests {
             .unwrap(),
         );
 
-        let _res = get_trusted_input(&mock, tx, 1).await.unwrap();
+        let (outpoint, amount, magic_sig) = get_trusted_input(&mock, tx, 1).await.unwrap();
+        assert_eq!(
+            OutPoint::from_str(
+                "104fa062124438e64349c44fa3d17050d0a10b7e3dbafdf0e8da846423da73c7:1"
+            )
+            .unwrap(),
+            outpoint
+        );
+        let amt: u64 = 100000;
+        assert_eq!(amt, amount);
+        assert_eq!("b890da969aa6f310", hex::encode(&magic_sig.1));
     }
 }
