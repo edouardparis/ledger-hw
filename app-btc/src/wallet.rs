@@ -437,7 +437,6 @@ mod tests {
     use std::str::FromStr;
 
     use bitcoin::consensus::encode::deserialize;
-    use bitcoin::hash_types::Txid;
     use futures_await_test::async_test;
 
     use ledger_hw_transport_mock::{RecordStore, TransportReplayer};
