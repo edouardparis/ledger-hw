@@ -2,7 +2,6 @@ use std::io::Write;
 use std::marker::Sync;
 use std::str::{from_utf8, FromStr};
 
-use bitcoin::blockdata::script::Script;
 use bitcoin::blockdata::transaction::{OutPoint, Transaction};
 use bitcoin::consensus::encode::{deserialize, Encodable, Error as EncodeError, VarInt};
 use bitcoin::hash_types::Txid;
@@ -20,7 +19,7 @@ use crate::constant::{
     BTCHIP_INS_SIGN_MESSAGE, MAX_SCRIPT_BLOCK,
 };
 use crate::error::AppError;
-use crate::input::DeviceSig;
+use crate::input::{DeviceSig, Input};
 
 #[derive(Debug)]
 pub enum AddressFormat {
@@ -190,54 +189,32 @@ pub fn ledger_decode_outpoint(data: &[u8; 56]) -> Result<(OutPoint, u64, DeviceS
     ))
 }
 
-pub fn ledger_encode_trusted_outpoint(
-    outpoint: &OutPoint,
-    amount: u64,
-    magic: &[u8; 4],
-    hmac_sig: &[u8; 8],
-) -> Result<Vec<u8>, EncodeError> {
-    let mut data: Vec<u8> = magic.to_vec();
-    outpoint.consensus_encode(&mut data)?;
-    data.extend(&(amount.to_le_bytes()));
-    data.extend(hmac_sig);
-    Ok(data)
-}
-
-pub enum RawInput {
-    Trusted(Vec<u8>),
-    Untrusted(Vec<u8>),
-}
-
-impl RawInput {
-    pub fn as_slice(&self) -> &[u8] {
-        return match self {
-            RawInput::Trusted(inp) => inp,
-            RawInput::Untrusted(inp) => inp,
-        };
-    }
-}
-
 pub async fn start_untrusted_hash_transaction_input<T: Transport + Sync>(
     transport: &T,
     new_tx: bool,
     version: u32,
     input_idx: usize,
-    inputs: &[RawInput],
-    redeem_script: Script,
-    bip143: bool,
+    inputs: &[Input],
 ) -> Result<(), AppError<T::Err>> {
     let mut data: Vec<u8> = Vec::new();
     btc_encode(&version, &mut data)?;
     btc_encode(&VarInt(inputs.len() as u64), &mut data)?;
+    let mut have_segwit = false;
+    for input in inputs {
+        if let Input::Segwit { txin: _, amount: _ } = input {
+            have_segwit = true;
+            break;
+        }
+    }
 
     let p2 = if new_tx {
-        if bip143 {
+        if have_segwit {
             0x02
         } else {
             0x00
         }
     } else {
-        if bip143 {
+        if have_segwit {
             0x10
         } else {
             0x80
@@ -249,27 +226,44 @@ pub async fn start_untrusted_hash_transaction_input<T: Transport + Sync>(
         .map_err(|e| AppError::Transport(e))?;
     check_status(status, Status::OK)?;
 
-    let script = redeem_script.as_bytes();
-    let sequence: Vec<u8> = vec![0xFF, 0xFF, 0xFF, 0xFF];
-
     for (i, input) in inputs.iter().enumerate() {
         let mut data: Vec<u8> = Vec::new();
-        if bip143 {
-            data.push(0x02);
-        } else {
-            match input {
-                RawInput::Trusted(_) => {
-                    data.push(0x01);
-                }
-                RawInput::Untrusted(_) => data.push(0x00),
-            }
-        }
+        let mut script: &[u8] = &[];
+        let mut sequence = [0xFF, 0xFF, 0xFF, 0xFF];
+
         match input {
-            RawInput::Trusted(tx) => {
-                data.push(tx.len() as u8);
-                data.extend(tx)
+            Input::Trusted {
+                txin,
+                amount,
+                device_sig,
+            } => {
+                data.push(0x01);
+                data.push(0x38);
+                data.extend(&device_sig.magic);
+                btc_encode(&txin.previous_output, &mut data)?;
+                data.extend(&(amount.to_le_bytes()));
+                data.extend(&device_sig.sig);
+                script = txin.script_sig.as_bytes();
+                if txin.sequence != 0 {
+                    sequence = txin.sequence.to_be_bytes();
+                }
             }
-            RawInput::Untrusted(tx) => data.extend(tx),
+            Input::Untrusted { txin, amount: _ } => {
+                data.push(0x00);
+                btc_encode(&txin.previous_output, &mut data)?;
+                script = txin.script_sig.as_bytes();
+                if txin.sequence != 0 {
+                    sequence = txin.sequence.to_be_bytes();
+                }
+            }
+            Input::Segwit { txin, amount } => {
+                data.push(0x02);
+                btc_encode(&txin.previous_output, &mut data)?;
+                data.extend(&(amount.to_le_bytes()));
+                if txin.sequence != 0 {
+                    sequence = txin.sequence.to_be_bytes();
+                }
+            }
         }
 
         if i == input_idx {
@@ -437,6 +431,10 @@ mod tests {
     use std::str::FromStr;
 
     use bitcoin::consensus::encode::deserialize;
+    // use bitcoin::hash_types::PubkeyHash;
+    // use bitcoin::hashes::Hash;
+    // use bitcoin::util::address::Payload;
+    use bitcoin::Script;
     use futures_await_test::async_test;
 
     use ledger_hw_transport_mock::{RecordStore, TransportReplayer};
@@ -539,4 +537,76 @@ mod tests {
         assert_eq!(amt, amount);
         assert_eq!("b890da969aa6f310", hex::encode(&magic_sig.sig));
     }
+    #[async_test]
+    async fn test_start_untrusted_hash_transaction_input() {
+        let mock = TransportReplayer::new(
+            RecordStore::from_str("
+                => e04000000d03800000000000000000000000
+                <= 41046666422d00f1b308fc7527198749f06fedb028b979c09f60d0348ef79c985e4138b86996b354774c434488d61c7fb20a83293ef3195d422fde9354e6cf2a74ce223137383731457244716465764c544c57424836577a6a556331454b4744517a434d41612d17bc55b7aa153ae07fba348692c2976e6889b769783d475ba7488fb547709000
+                => e0440000050100000001
+                <= 9000
+                => e04480003b013832005df4c773da236484dae8f0fdba3d7e0ba1d05070d1a34fc44943e638441262a04f1001000000a086010000000000b890da969aa6f31019
+                <= 9000
+                => e04480001d76a9144533f5fb9b4817f713c48f0bfe96b9f50c476c9b88acffffffff
+                <= 9000
+                => e04a80002301905f0100000000001976a91472a5d75c8d2d0565b656a5232703b167d50d5a2b88ac
+                <= 00009000
+                => e04800001303800000000000000000000000000000000001
+                <= 3145022100ff492ad0b3a634aa7751761f7e063bf6ef4148cd44ef8930164580d5ba93a17802206fac94b32e296549e2e478ce806b58d61cfacbfed35ac4ceca26ac531f92b20a019000
+            ",
+            )
+            .unwrap(),
+        );
+
+        let path = DerivationPath::from_str("m/0'/0/0").unwrap();
+        let (_key, _address, _chaincode) =
+            get_wallet_public_key(&mock, path, false, AddressFormat::Legacy)
+                .await
+                .unwrap();
+        // let pk = compress_public_key(&key);
+        // let mut hash_engine = PubkeyHash::engine();
+        // pk.write_into(&mut hash_engine);
+        // let script = Payload::PubkeyHash(PubkeyHash::from_engine(hash_engine)).script_pubkey();
+        let s = hex::decode("76a9144533f5fb9b4817f713c48f0bfe96b9f50c476c9b88ac").unwrap();
+        let script: Script = s.into();
+
+        let trusted_input_exchange = hex::decode("32005df4c773da236484dae8f0fdba3d7e0ba1d05070d1a34fc44943e638441262a04f1001000000a086010000000000b890da969aa6f310").unwrap();
+        let mut res: [u8; 56] = [0; 56];
+        res.copy_from_slice(&trusted_input_exchange);
+        let (outpoint, amount, magic_sig) = ledger_decode_outpoint(&res).unwrap();
+
+        println!(
+            "{}",
+            hex::encode(vec![
+                118, 169, 20, 69, 51, 245, 251, 155, 72, 23, 247, 19, 196, 143, 11, 254, 150, 185,
+                245, 12, 71, 108, 155, 136, 172
+            ])
+        );
+
+        println!(
+            "{:?}",
+            hex::decode("e04480001d76a9144533f5fb9b4817f713c48f0bfe96b9f50c476c9b88acffffffff")
+                .unwrap()
+        );
+
+        let input = Input::new_trusted(outpoint, script, 0, amount, magic_sig);
+        let inputs: Vec<Input> = vec![input];
+        start_untrusted_hash_transaction_input(&mock, true, 1, 0, &inputs)
+            .await
+            .unwrap();
+    }
+
+    // fn compress_public_key(key: &PublicKey) -> PublicKey {
+    //     let pk = key.to_bytes();
+    //     let mut data: Vec<u8> = Vec::new();
+    //     if (pk[64] & 1) != 0 {
+    //         data.push(0x03);
+    //     } else {
+    //         data.push(0x02);
+    //     }
+    //     data.extend(&pk[1..33]);
+
+    //     let p = PublicKey::from_slice(&data).unwrap();
+    //     p
+    // }
 }
