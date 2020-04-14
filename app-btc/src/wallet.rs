@@ -2,7 +2,7 @@ use std::io::Write;
 use std::marker::Sync;
 use std::str::{from_utf8, FromStr};
 
-use bitcoin::blockdata::transaction::{OutPoint, Transaction};
+use bitcoin::blockdata::transaction::{OutPoint, Transaction, TxOut};
 use bitcoin::consensus::encode::{deserialize, Encodable, Error as EncodeError, VarInt};
 use bitcoin::hash_types::Txid;
 use bitcoin::util::address::Address;
@@ -13,11 +13,7 @@ use ledger_hw::device::LEDGER_PACKET_SIZE;
 use ledger_hw::Status;
 use ledger_hw_transport::Transport;
 
-use crate::constant::{
-    BTCHIP_CLA, BTCHIP_INS_GET_TRUSTED_INPUT, BTCHIP_INS_GET_WALLET_PUBLIC_KEY,
-    BTCHIP_INS_HASH_INPUT_FINALIZE, BTCHIP_INS_HASH_INPUT_START, BTCHIP_INS_HASH_SIGN,
-    BTCHIP_INS_SIGN_MESSAGE, MAX_SCRIPT_BLOCK,
-};
+use crate::constant::*;
 use crate::error::AppError;
 use crate::input::{DeviceSig, Input};
 
@@ -34,7 +30,7 @@ pub enum AddressFormat {
 // returns (public_key, bitcoin_address, chaincode)
 pub async fn get_wallet_public_key<T: Transport + Sync>(
     transport: &T,
-    path: DerivationPath,
+    path: &DerivationPath,
     verify: bool,
     format: AddressFormat,
 ) -> Result<(PublicKey, Address, ChainCode), AppError<T::Err>> {
@@ -300,10 +296,83 @@ pub async fn start_untrusted_hash_transaction_input<T: Transport + Sync>(
     Ok(())
 }
 
+pub async fn provide_output_full_change_path<T: Transport + Sync>(
+    transport: &T,
+    path: &DerivationPath,
+) -> Result<(), AppError<T::Err>> {
+    let data = path_to_be_bytes(path);
+    let (_, status) = transport
+        .send(
+            BTCHIP_CLA,
+            BTCHIP_INS_HASH_INPUT_FINALIZE_FULL,
+            0xff,
+            0x00,
+            &data,
+        )
+        .await
+        .map_err(|e| AppError::Transport(e))?;
+    check_status(status, Status::OK)?;
+    Ok(())
+}
+
+pub async fn hash_output_full<T: Transport + Sync>(
+    transport: &T,
+    outputs: &[TxOut],
+) -> Result<(), AppError<T::Err>> {
+    let mut data: Vec<u8> = Vec::new();
+    btc_encode(&VarInt(outputs.len() as u64), &mut data)?;
+    for output in outputs.iter() {
+        btc_encode(output, &mut data)?;
+    }
+    for (i, chunk) in data.chunks(MAX_SCRIPT_BLOCK).enumerate() {
+        let p1: u8 = if i != 0 { 0x80 } else { 0x00 };
+        let (_, status) = transport
+            .send(
+                BTCHIP_CLA,
+                BTCHIP_INS_HASH_INPUT_FINALIZE_FULL,
+                p1,
+                0x00,
+                &chunk,
+            )
+            .await
+            .map_err(|e| AppError::Transport(e))?;
+        check_status(status, Status::OK)?;
+    }
+    Ok(())
+}
+
+pub async fn finalize_input_full<T: Transport + Sync>(
+    transport: &T,
+    outputs: &[TxOut],
+) -> Result<Vec<u8>, AppError<T::Err>> {
+    let mut data: Vec<u8> = Vec::new();
+    btc_encode(&VarInt(outputs.len() as u64), &mut data)?;
+    for output in outputs.iter() {
+        btc_encode(output, &mut data)?;
+    }
+    let mut res: Vec<u8> = Vec::new();
+    for (i, chunk) in data.chunks(MAX_SCRIPT_BLOCK).enumerate() {
+        let p1: u8 = if i != 0 { 0x80 } else { 0x00 };
+        let (r, status) = transport
+            .send(
+                BTCHIP_CLA,
+                BTCHIP_INS_HASH_INPUT_FINALIZE_FULL,
+                p1,
+                0x00,
+                &chunk,
+            )
+            .await
+            .map_err(|e| AppError::Transport(e))?;
+        check_status(status, Status::OK)?;
+        res = r;
+    }
+    Ok(res)
+}
+
 pub async fn finalize_input<T: Transport + Sync>(
     transport: &T,
-    path: DerivationPath,
-    address: Address,
+    path: &DerivationPath,
+    address: &Address,
     amount: u64,
     fee: u64,
 ) -> Result<Vec<u8>, AppError<T::Err>> {
@@ -315,7 +384,7 @@ pub async fn finalize_input<T: Transport + Sync>(
     data.extend(&(fee.to_be_bytes()));
     let p = path_to_be_bytes(path);
     data.extend(&p);
-    let (_, status) = transport
+    let (res, status) = transport
         .send(
             BTCHIP_CLA,
             BTCHIP_INS_HASH_INPUT_FINALIZE,
@@ -326,13 +395,12 @@ pub async fn finalize_input<T: Transport + Sync>(
         .await
         .map_err(|e| AppError::Transport(e))?;
     check_status(status, Status::OK)?;
-    Err(AppError::Unexpected)
+    Ok(res)
 }
 
-// signTransaction
 pub async fn untrusted_hash_sign<T: Transport + Sync>(
     transport: &T,
-    path: DerivationPath,
+    path: &DerivationPath,
     lock_time: u32,
     sighash_type: u8,
     pin: Option<String>,
@@ -358,7 +426,7 @@ pub async fn untrusted_hash_sign<T: Transport + Sync>(
 
 pub async fn sign_message<T: Transport + Sync>(
     transport: &T,
-    path: DerivationPath,
+    path: &DerivationPath,
     message: &[u8],
 ) -> Result<(u8, Vec<u8>, Vec<u8>), AppError<T::Err>> {
     let mut data: Vec<u8> = path_to_be_bytes(path);
@@ -409,8 +477,8 @@ fn btc_encode<T, W: Write, E: Encodable>(e: &E, w: W) -> Result<usize, AppError<
         .map_err(|e| AppError::ConsensusEncode(e))
 }
 
-fn path_to_be_bytes(path: DerivationPath) -> Vec<u8> {
-    let child_numbers: Vec<ChildNumber> = path.into();
+fn path_to_be_bytes(path: &DerivationPath) -> Vec<u8> {
+    let child_numbers: &[ChildNumber] = path.as_ref();
     let p: Vec<u32> = child_numbers.iter().map(|&x| u32::from(x)).collect();
     let mut data: Vec<u8> = vec![child_numbers.len() as u8];
     for child_number in p {
