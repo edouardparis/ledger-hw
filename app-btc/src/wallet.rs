@@ -2,7 +2,7 @@ use std::io::Write;
 use std::marker::Sync;
 use std::str::{from_utf8, FromStr};
 
-use bitcoin::blockdata::transaction::{OutPoint, Transaction, TxOut};
+use bitcoin::blockdata::transaction::{OutPoint, SigHashType, Transaction, TxOut};
 use bitcoin::consensus::encode::{deserialize, Encodable, Error as EncodeError, VarInt};
 use bitcoin::hash_types::Txid;
 use bitcoin::util::address::Address;
@@ -71,7 +71,7 @@ pub async fn get_wallet_public_key<T: Transport + Sync>(
 
 pub async fn get_trusted_input<T: Transport + Sync>(
     transport: &T,
-    transaction: Transaction,
+    transaction: &Transaction,
     index: usize,
 ) -> Result<(OutPoint, u64, DeviceSig), AppError<T::Err>> {
     // First Exchange:
@@ -324,8 +324,10 @@ pub async fn hash_output_full<T: Transport + Sync>(
     for output in outputs.iter() {
         btc_encode(output, &mut data)?;
     }
-    for (i, chunk) in data.chunks(MAX_SCRIPT_BLOCK).enumerate() {
-        let p1: u8 = if i != 0 { 0x80 } else { 0x00 };
+    let chunks = data.chunks(MAX_SCRIPT_BLOCK);
+    let nb_chunk = chunks.len();
+    for (i, chunk) in chunks.enumerate() {
+        let p1: u8 = if i == nb_chunk - 1 { 0x80 } else { 0x00 };
         let (_, status) = transport
             .send(
                 BTCHIP_CLA,
@@ -402,7 +404,7 @@ pub async fn untrusted_hash_sign<T: Transport + Sync>(
     transport: &T,
     path: &DerivationPath,
     lock_time: u32,
-    sighash_type: u8,
+    sighash_type: SigHashType,
     pin: Option<String>,
 ) -> Result<Vec<u8>, AppError<T::Err>> {
     let mut data = path_to_be_bytes(path);
@@ -412,7 +414,7 @@ pub async fn untrusted_hash_sign<T: Transport + Sync>(
         data.extend(pin_bytes);
     }
     data.extend(&(lock_time.to_be_bytes()));
-    data.push(sighash_type);
+    data.extend(&(sighash_type.as_u32().to_be_bytes()));
     let (mut res, status) = transport
         .send(BTCHIP_CLA, BTCHIP_INS_HASH_SIGN, 0x00, 0x00, &data)
         .await
@@ -593,7 +595,7 @@ mod tests {
             .unwrap(),
         );
 
-        let (outpoint, amount, magic_sig) = get_trusted_input(&mock, tx, 1).await.unwrap();
+        let (outpoint, amount, magic_sig) = get_trusted_input(&mock, &tx, 1).await.unwrap();
         assert_eq!(
             OutPoint::from_str(
                 "104fa062124438e64349c44fa3d17050d0a10b7e3dbafdf0e8da846423da73c7:1"
@@ -633,5 +635,84 @@ mod tests {
         start_untrusted_hash_transaction_input(&mock, true, 1, 0, &inputs)
             .await
             .unwrap();
+    }
+    #[async_test]
+    async fn test_example_payment() {
+        let raw_tx = hex::decode("01000000014ea60aeac5252c14291d428915bd7ccd1bfc4af009f4d4dc57ae597ed0420b71010000008a47304402201f36a12c240dbf9e566bc04321050b1984cd6eaf6caee8f02bb0bfec08e3354b022012ee2aeadcbbfd1e92959f57c15c1c6debb757b798451b104665aa3010569b49014104090b15bde569386734abf2a2b99f9ca6a50656627e77de663ca7325702769986cf26cc9dd7fdea0af432c8e2becc867c932e1b9dd742f2a108997c2252e2bdebffffffff0281b72e00000000001976a91472a5d75c8d2d0565b656a5232703b167d50d5a2b88aca0860100000000001976a9144533f5fb9b4817f713c48f0bfe96b9f50c476c9b88ac00000000")
+            .expect("could not decode raw tx");
+        let tx: Transaction = deserialize(&raw_tx).expect("tx non valid");
+        let mock = TransportReplayer::new(
+            RecordStore::from_str("
+                => e042000009000000010100000001
+                <= 9000
+                => e0428000254ea60aeac5252c14291d428915bd7ccd1bfc4af009f4d4dc57ae597ed0420b71010000008a
+                <= 9000
+                => e04280003247304402201f36a12c240dbf9e566bc04321050b1984cd6eaf6caee8f02bb0bfec08e3354b022012ee2aeadcbbfd1e92959f
+                <= 9000
+                => e04280003257c15c1c6debb757b798451b104665aa3010569b49014104090b15bde569386734abf2a2b99f9ca6a50656627e77de663ca7
+                <= 9000
+                => e04280002a325702769986cf26cc9dd7fdea0af432c8e2becc867c932e1b9dd742f2a108997c2252e2bdebffffffff
+                <= 9000
+                => e04280000102
+                <= 9000
+                => e04280002281b72e00000000001976a91472a5d75c8d2d0565b656a5232703b167d50d5a2b88ac
+                <= 9000
+                => e042800022a0860100000000001976a9144533f5fb9b4817f713c48f0bfe96b9f50c476c9b88ac
+                <= 9000
+                => e04280000400000000
+                <= 32005df4c773da236484dae8f0fdba3d7e0ba1d05070d1a34fc44943e638441262a04f1001000000a086010000000000b890da969aa6f3109000
+                => e0440000050100000001
+                <= 9000
+                => e04480003b013832005df4c773da236484dae8f0fdba3d7e0ba1d05070d1a34fc44943e638441262a04f1001000000a086010000000000b890da969aa6f31019
+                <= 9000
+                => e04480001d76a9144533f5fb9b4817f713c48f0bfe96b9f50c476c9b88acffffffff
+                <= 9000
+                => e04a80002301905f0100000000001976a91472a5d75c8d2d0565b656a5232703b167d50d5a2b88ac
+                <= 00009000
+                => e04800001303800000000000000000000000000000000001
+                <= 3145022100ff492ad0b3a634aa7751761f7e063bf6ef4148cd44ef8930164580d5ba93a17802206fac94b32e296549e2e478ce806b58d61cfacbfed35ac4ceca26ac531f92b20a019000
+            ",
+            )
+            .unwrap(),
+        );
+
+        let (outpoint, amount, magic_sig) = get_trusted_input(&mock, &tx, 1).await.unwrap();
+        let input = Input::new_trusted(
+            outpoint,
+            tx.output[1].script_pubkey.clone(),
+            0,
+            amount,
+            magic_sig,
+        );
+        let txin = input.txin();
+        let inputs: Vec<Input> = vec![input];
+        start_untrusted_hash_transaction_input(&mock, true, 1, 0, &inputs)
+            .await
+            .unwrap();
+
+        let raw_txout =
+            hex::decode("905f0100000000001976a91472a5d75c8d2d0565b656a5232703b167d50d5a2b88ac")
+                .unwrap();
+        let txout: TxOut = deserialize(&raw_txout).unwrap();
+
+        // println!(
+        //     "{:?}",
+        //     hex::decode(
+        //         "e04a80002301905f0100000000001976a91472a5d75c8d2d0565b656a5232703b167d50d5a2b88ac"
+        //     )
+        //     .unwrap()
+        // );
+
+        hash_output_full(&mock, &[txout.clone()]).await.unwrap();
+
+        let target_tx: Transaction = Transaction {
+            lock_time: 0,
+            version: 1,
+            input: vec![txin],
+            output: vec![txout],
+        };
+
+        let path = DerivationPath::from_str("m/0'/0/0").unwrap();
+        let _res = untrusted_hash_sign(&mock, &path, target_tx.lock_time, SigHashType::All, None);
     }
 }

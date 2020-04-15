@@ -55,4 +55,16 @@ impl Input {
             amount: amount,
         }
     }
+
+    pub fn txin(&self) -> TxIn {
+        match self {
+            Input::Trusted {
+                txin: t,
+                amount: _,
+                device_sig: _,
+            } => t.clone(),
+            Input::Untrusted { txin: t, amount: _ } => t.clone(),
+            Input::Segwit { txin: t, amount: _ } => t.clone(),
+        }
+    }
 }
