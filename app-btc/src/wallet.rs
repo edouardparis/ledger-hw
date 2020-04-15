@@ -520,7 +520,7 @@ mod tests {
 
         let path = DerivationPath::from_str("m/44'/0'/0'/0").unwrap();
         let (key, address, chaincode) =
-            get_wallet_public_key(&mock, path, false, AddressFormat::Legacy)
+            get_wallet_public_key(&mock, &path, false, AddressFormat::Legacy)
                 .await
                 .unwrap();
 
@@ -548,7 +548,7 @@ mod tests {
             ").unwrap());
 
         let path = DerivationPath::from_str("m/44'/0'/0'/0/0").unwrap();
-        let (v, r, s) = sign_message(&mock, path, "foobar".as_bytes())
+        let (v, r, s) = sign_message(&mock, &path, "foobar".as_bytes())
             .await
             .unwrap();
         assert_eq!(1 as u8, v);
@@ -609,8 +609,6 @@ mod tests {
     async fn test_start_untrusted_hash_transaction_input() {
         let mock = TransportReplayer::new(
             RecordStore::from_str("
-                => e04000000d03800000000000000000000000
-                <= 41046666422d00f1b308fc7527198749f06fedb028b979c09f60d0348ef79c985e4138b86996b354774c434488d61c7fb20a83293ef3195d422fde9354e6cf2a74ce223137383731457244716465764c544c57424836577a6a556331454b4744517a434d41612d17bc55b7aa153ae07fba348692c2976e6889b769783d475ba7488fb547709000
                 => e0440000050100000001
                 <= 9000
                 => e04480003b013832005df4c773da236484dae8f0fdba3d7e0ba1d05070d1a34fc44943e638441262a04f1001000000a086010000000000b890da969aa6f31019
@@ -622,15 +620,6 @@ mod tests {
             .unwrap(),
         );
 
-        let path = DerivationPath::from_str("m/0'/0/0").unwrap();
-        let (_key, _address, _chaincode) =
-            get_wallet_public_key(&mock, path, false, AddressFormat::Legacy)
-                .await
-                .unwrap();
-        // let pk = compress_public_key(&key);
-        // let mut hash_engine = PubkeyHash::engine();
-        // pk.write_into(&mut hash_engine);
-        // let script = Payload::PubkeyHash(PubkeyHash::from_engine(hash_engine)).script_pubkey();
         let s = hex::decode("76a9144533f5fb9b4817f713c48f0bfe96b9f50c476c9b88ac").unwrap();
         let script: Script = s.into();
 
@@ -639,30 +628,10 @@ mod tests {
         res.copy_from_slice(&trusted_input_exchange);
         let (outpoint, amount, magic_sig) = ledger_decode_outpoint(&res).unwrap();
 
-        // println!(
-        //     "{:?}",
-        //     hex::decode("e04480001d76a9144533f5fb9b4817f713c48f0bfe96b9f50c476c9b88acffffffff")
-        //         .unwrap()
-        // );
-
         let input = Input::new_trusted(outpoint, script, 0, amount, magic_sig);
         let inputs: Vec<Input> = vec![input];
         start_untrusted_hash_transaction_input(&mock, true, 1, 0, &inputs)
             .await
             .unwrap();
     }
-
-    // fn compress_public_key(key: &PublicKey) -> PublicKey {
-    //     let pk = key.to_bytes();
-    //     let mut data: Vec<u8> = Vec::new();
-    //     if (pk[64] & 1) != 0 {
-    //         data.push(0x03);
-    //     } else {
-    //         data.push(0x02);
-    //     }
-    //     data.extend(&pk[1..33]);
-
-    //     let p = PublicKey::from_slice(&data).unwrap();
-    //     p
-    // }
 }
