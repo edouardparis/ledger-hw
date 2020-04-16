@@ -15,13 +15,18 @@ use ledger_hw_transport::Transport;
 
 use crate::constant::*;
 use crate::error::AppError;
-use crate::input::{DeviceSig, Input};
 
 #[derive(Debug)]
 pub enum AddressFormat {
     Legacy,
     P2sh,
     Bech32,
+}
+
+#[derive(Debug)]
+pub struct DeviceSig {
+    pub magic: [u8; 4],
+    pub sig: [u8; 8],
 }
 
 // path a BIP 32 path
