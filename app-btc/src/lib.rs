@@ -1,6 +1,5 @@
 pub mod constant;
 pub mod error;
-pub mod input;
 pub mod tx;
 pub mod util;
 pub mod wallet;

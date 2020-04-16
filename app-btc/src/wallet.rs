@@ -2,7 +2,7 @@ use std::io::Write;
 use std::marker::Sync;
 use std::str::{from_utf8, FromStr};
 
-use bitcoin::blockdata::transaction::{OutPoint, SigHashType, Transaction, TxOut};
+use bitcoin::blockdata::transaction::{OutPoint, SigHashType, Transaction, TxIn, TxOut};
 use bitcoin::consensus::encode::{deserialize, Encodable, Error as EncodeError, VarInt};
 use bitcoin::hash_types::Txid;
 use bitcoin::util::address::Address;
@@ -190,19 +190,12 @@ pub async fn start_untrusted_hash_transaction_input<T: Transport + Sync>(
     new_tx: bool,
     version: u32,
     input_idx: usize,
-    inputs: &[Input],
+    inputs: &[(&TxIn, u64, Option<DeviceSig>)],
+    have_segwit: bool,
 ) -> Result<(), AppError<T::Err>> {
     let mut data: Vec<u8> = Vec::new();
     btc_encode(&version, &mut data)?;
     btc_encode(&VarInt(inputs.len() as u64), &mut data)?;
-    let mut have_segwit = false;
-    for input in inputs {
-        if let Input::Segwit { txin: _, amount: _ } = input {
-            have_segwit = true;
-            break;
-        }
-    }
-
     let p2 = if new_tx {
         if have_segwit {
             0x02
@@ -223,44 +216,32 @@ pub async fn start_untrusted_hash_transaction_input<T: Transport + Sync>(
     check_status(status, Status::OK)?;
 
     for (i, input) in inputs.iter().enumerate() {
+        let txin = input.0;
+        let amount = input.1;
         let mut data: Vec<u8> = Vec::new();
-        let mut script: &[u8] = &[];
-        let mut sequence = [0xFF, 0xFF, 0xFF, 0xFF];
+        let sequence = if txin.sequence != 0 {
+            txin.sequence.to_be_bytes()
+        } else {
+            [0xFF, 0xFF, 0xFF, 0xFF]
+        };
 
-        match input {
-            Input::Trusted {
-                txin,
-                amount,
-                device_sig,
-            } => {
-                data.push(0x01);
-                data.push(0x38);
-                data.extend(&device_sig.magic);
-                btc_encode(&txin.previous_output, &mut data)?;
-                data.extend(&(amount.to_le_bytes()));
-                data.extend(&device_sig.sig);
-                script = txin.script_sig.as_bytes();
-                if txin.sequence != 0 {
-                    sequence = txin.sequence.to_be_bytes();
-                }
-            }
-            Input::Untrusted { txin, amount: _ } => {
-                data.push(0x00);
-                btc_encode(&txin.previous_output, &mut data)?;
-                script = txin.script_sig.as_bytes();
-                if txin.sequence != 0 {
-                    sequence = txin.sequence.to_be_bytes();
-                }
-            }
-            Input::Segwit { txin, amount } => {
-                data.push(0x02);
-                btc_encode(&txin.previous_output, &mut data)?;
-                data.extend(&(amount.to_le_bytes()));
-                if txin.sequence != 0 {
-                    sequence = txin.sequence.to_be_bytes();
-                }
-            }
+        if let Some(device_sig) = &input.2 {
+            data.push(0x01);
+            data.push(0x38);
+            data.extend(&device_sig.magic);
+            btc_encode(&txin.previous_output, &mut data)?;
+            data.extend(&(amount.to_le_bytes()));
+            data.extend(&device_sig.sig);
+        } else if have_segwit {
+            data.push(0x02);
+            btc_encode(&txin.previous_output, &mut data)?;
+            data.extend(&(amount.to_le_bytes()));
+        } else {
+            data.push(0x00);
+            btc_encode(&txin.previous_output, &mut data)?;
         }
+
+        let script = txin.script_sig.as_bytes();
 
         if i == input_idx {
             btc_encode(&VarInt(script.len() as u64), &mut data)?;
@@ -278,11 +259,11 @@ pub async fn start_untrusted_hash_transaction_input<T: Transport + Sync>(
             continue;
         }
 
-        let mut offset: usize = 0;
-        for chunk in script.chunks(MAX_SCRIPT_BLOCK) {
+        let chunks = script.chunks(MAX_SCRIPT_BLOCK);
+        let nb_chunk = chunks.len();
+        for (i, chunk) in chunks.enumerate() {
             let mut data = chunk.to_vec();
-            offset += chunk.len();
-            if offset == script.len() {
+            if i == nb_chunk - 1 {
                 data.extend(&sequence);
             }
 
@@ -317,12 +298,12 @@ pub async fn provide_output_full_change_path<T: Transport + Sync>(
 
 pub async fn hash_output_full<T: Transport + Sync>(
     transport: &T,
-    outputs: &[TxOut],
+    outputs: &[&TxOut],
 ) -> Result<(), AppError<T::Err>> {
     let mut data: Vec<u8> = Vec::new();
     btc_encode(&VarInt(outputs.len() as u64), &mut data)?;
     for output in outputs.iter() {
-        btc_encode(output, &mut data)?;
+        btc_encode(*output, &mut data)?;
     }
     let chunks = data.chunks(MAX_SCRIPT_BLOCK);
     let nb_chunk = chunks.len();
@@ -345,12 +326,12 @@ pub async fn hash_output_full<T: Transport + Sync>(
 
 pub async fn finalize_input_full<T: Transport + Sync>(
     transport: &T,
-    outputs: &[TxOut],
+    outputs: &[&TxOut],
 ) -> Result<Vec<u8>, AppError<T::Err>> {
     let mut data: Vec<u8> = Vec::new();
     btc_encode(&VarInt(outputs.len() as u64), &mut data)?;
     for output in outputs.iter() {
-        btc_encode(output, &mut data)?;
+        btc_encode(*output, &mut data)?;
     }
     let mut res: Vec<u8> = Vec::new();
     for (i, chunk) in data.chunks(MAX_SCRIPT_BLOCK).enumerate() {
@@ -629,12 +610,23 @@ mod tests {
         let mut res: [u8; 56] = [0; 56];
         res.copy_from_slice(&trusted_input_exchange);
         let (outpoint, amount, magic_sig) = ledger_decode_outpoint(&res).unwrap();
+        let txin = TxIn {
+            previous_output: outpoint,
+            script_sig: script,
+            sequence: 0,
+            witness: Vec::new(),
+        };
 
-        let input = Input::new_trusted(outpoint, script, 0, amount, magic_sig);
-        let inputs: Vec<Input> = vec![input];
-        start_untrusted_hash_transaction_input(&mock, true, 1, 0, &inputs)
-            .await
-            .unwrap();
+        start_untrusted_hash_transaction_input(
+            &mock,
+            true,
+            1,
+            0,
+            &[(&txin, amount, Some(magic_sig))],
+            false,
+        )
+        .await
+        .unwrap();
     }
     #[async_test]
     async fn test_example_payment() {
@@ -677,33 +669,30 @@ mod tests {
         );
 
         let (outpoint, amount, magic_sig) = get_trusted_input(&mock, &tx, 1).await.unwrap();
-        let input = Input::new_trusted(
-            outpoint,
-            tx.output[1].script_pubkey.clone(),
+        let txin = TxIn {
+            previous_output: outpoint,
+            script_sig: tx.output[1].script_pubkey.clone(),
+            sequence: 0,
+            witness: Vec::new(),
+        };
+
+        start_untrusted_hash_transaction_input(
+            &mock,
+            true,
+            1,
             0,
-            amount,
-            magic_sig,
-        );
-        let txin = input.txin();
-        let inputs: Vec<Input> = vec![input];
-        start_untrusted_hash_transaction_input(&mock, true, 1, 0, &inputs)
-            .await
-            .unwrap();
+            &[(&txin, amount, Some(magic_sig))],
+            false,
+        )
+        .await
+        .unwrap();
 
         let raw_txout =
             hex::decode("905f0100000000001976a91472a5d75c8d2d0565b656a5232703b167d50d5a2b88ac")
                 .unwrap();
         let txout: TxOut = deserialize(&raw_txout).unwrap();
 
-        // println!(
-        //     "{:?}",
-        //     hex::decode(
-        //         "e04a80002301905f0100000000001976a91472a5d75c8d2d0565b656a5232703b167d50d5a2b88ac"
-        //     )
-        //     .unwrap()
-        // );
-
-        hash_output_full(&mock, &[txout.clone()]).await.unwrap();
+        hash_output_full(&mock, &[&txout]).await.unwrap();
 
         let target_tx: Transaction = Transaction {
             lock_time: 0,
