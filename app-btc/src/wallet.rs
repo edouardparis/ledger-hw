@@ -2,12 +2,13 @@ use std::io::Write;
 use std::marker::Sync;
 use std::str::{from_utf8, FromStr};
 
-use bitcoin::blockdata::transaction::{OutPoint, SigHashType, Transaction, TxIn, TxOut};
+use bitcoin::blockdata::transaction::{OutPoint, SigHashType, Transaction, TxOut};
 use bitcoin::consensus::encode::{deserialize, Encodable, Error as EncodeError, VarInt};
 use bitcoin::hash_types::Txid;
 use bitcoin::util::address::Address;
 use bitcoin::util::bip32::{ChainCode, ChildNumber, DerivationPath};
 use bitcoin::util::key::PublicKey;
+use bitcoin::Script;
 
 use ledger_hw::device::LEDGER_PACKET_SIZE;
 use ledger_hw::Status;
@@ -195,7 +196,8 @@ pub async fn start_untrusted_hash_transaction_input<T: Transport + Sync>(
     new_tx: bool,
     version: u32,
     input_idx: usize,
-    inputs: &[(&TxIn, u64, Option<DeviceSig>)],
+    inputs: &[(&OutPoint, u32, u64, Option<DeviceSig>)],
+    redeem_script: &Script,
     have_segwit: bool,
 ) -> Result<(), AppError<T::Err>> {
     let mut data: Vec<u8> = Vec::new();
@@ -221,32 +223,32 @@ pub async fn start_untrusted_hash_transaction_input<T: Transport + Sync>(
     check_status(status, Status::OK)?;
 
     for (i, input) in inputs.iter().enumerate() {
-        let txin = input.0;
-        let amount = input.1;
+        let outpoint = input.0;
+        let amount = input.2;
         let mut data: Vec<u8> = Vec::new();
-        let sequence = if txin.sequence != 0 {
-            txin.sequence.to_be_bytes()
+        let sequence = if input.1 != 0 {
+            input.1.to_be_bytes()
         } else {
             [0xFF, 0xFF, 0xFF, 0xFF]
         };
 
-        if let Some(device_sig) = &input.2 {
+        if let Some(device_sig) = &input.3 {
             data.push(0x01);
             data.push(0x38);
             data.extend(&device_sig.magic);
-            btc_encode(&txin.previous_output, &mut data)?;
+            btc_encode(outpoint, &mut data)?;
             data.extend(&(amount.to_le_bytes()));
             data.extend(&device_sig.sig);
         } else if have_segwit {
             data.push(0x02);
-            btc_encode(&txin.previous_output, &mut data)?;
+            btc_encode(outpoint, &mut data)?;
             data.extend(&(amount.to_le_bytes()));
         } else {
             data.push(0x00);
-            btc_encode(&txin.previous_output, &mut data)?;
+            btc_encode(outpoint, &mut data)?;
         }
 
-        let script = txin.script_sig.as_bytes();
+        let script = redeem_script.as_bytes();
 
         if i == input_idx {
             btc_encode(&VarInt(script.len() as u64), &mut data)?;
@@ -615,19 +617,14 @@ mod tests {
         let mut res: [u8; 56] = [0; 56];
         res.copy_from_slice(&trusted_input_exchange);
         let (outpoint, amount, magic_sig) = ledger_decode_outpoint(&res).unwrap();
-        let txin = TxIn {
-            previous_output: outpoint,
-            script_sig: script,
-            sequence: 0,
-            witness: Vec::new(),
-        };
 
         start_untrusted_hash_transaction_input(
             &mock,
             true,
             1,
             0,
-            &[(&txin, amount, Some(magic_sig))],
+            &[(&outpoint, 0, amount, Some(magic_sig))],
+            &script,
             false,
         )
         .await
@@ -674,19 +671,14 @@ mod tests {
         );
 
         let (outpoint, amount, magic_sig) = get_trusted_input(&mock, &tx, 1).await.unwrap();
-        let txin = TxIn {
-            previous_output: outpoint,
-            script_sig: tx.output[1].script_pubkey.clone(),
-            sequence: 0,
-            witness: Vec::new(),
-        };
 
         start_untrusted_hash_transaction_input(
             &mock,
             true,
             1,
             0,
-            &[(&txin, amount, Some(magic_sig))],
+            &[(&outpoint, 0, amount, Some(magic_sig))],
+            &tx.output[1].script_pubkey,
             false,
         )
         .await
@@ -699,14 +691,18 @@ mod tests {
 
         hash_output_full(&mock, &[&txout]).await.unwrap();
 
-        let target_tx: Transaction = Transaction {
-            lock_time: 0,
-            version: 1,
-            input: vec![txin],
-            output: vec![txout],
-        };
-
         let path = DerivationPath::from_str("m/0'/0/0").unwrap();
-        let _res = untrusted_hash_sign(&mock, &path, target_tx.lock_time, SigHashType::All, None);
+        let _res = untrusted_hash_sign(&mock, &path, 0, SigHashType::All, None);
+
+        // let target_tx: Transaction = Transaction {
+        //     lock_time: 0,
+        //     version: 1,
+        //     input: vec![TxIn {
+        //         sequence: 0,
+        //         script_sig: script_sig,
+        //         previous_output: outpoint,
+        //     }],
+        //     output: vec![txout],
+        // };
     }
 }
