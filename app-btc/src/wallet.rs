@@ -395,14 +395,16 @@ pub async fn untrusted_hash_sign<T: Transport + Sync>(
     sighash_type: SigHashType,
     pin: Option<String>,
 ) -> Result<Vec<u8>, AppError<T::Err>> {
-    let mut data = path_to_be_bytes(path);
+    let mut data: Vec<u8> = path_to_be_bytes(path);
     if let Some(p) = pin {
         let pin_bytes = p.into_bytes();
         data.push(pin_bytes.len() as u8);
         data.extend(pin_bytes);
+    } else {
+        data.push(0x00);
     }
     data.extend(&(lock_time.to_be_bytes()));
-    data.extend(&(sighash_type.as_u32().to_be_bytes()));
+    data.push(sighash_type as u8);
     let (mut res, status) = transport
         .send(BTCHIP_CLA, BTCHIP_INS_HASH_SIGN, 0x00, 0x00, &data)
         .await
@@ -692,7 +694,11 @@ mod tests {
         hash_output_full(&mock, &[&txout]).await.unwrap();
 
         let path = DerivationPath::from_str("m/0'/0/0").unwrap();
-        let _res = untrusted_hash_sign(&mock, &path, 0, SigHashType::All, None);
+        let sig = untrusted_hash_sign(&mock, &path, 0, SigHashType::All, None)
+            .await
+            .unwrap();
+
+        let mut _s: Vec<u8> = vec![sig.len() as u8];
 
         // let target_tx: Transaction = Transaction {
         //     lock_time: 0,
