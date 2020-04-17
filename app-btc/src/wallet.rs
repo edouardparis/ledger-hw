@@ -464,6 +464,18 @@ pub async fn sign_message_sign<T: Transport + Sync>(
     Ok((v, r.to_vec(), s.to_vec()))
 }
 
+pub fn compress_key(pubkey: &PublicKey) -> Result<PublicKey, bitcoin::util::key::Error> {
+    if pubkey.compressed {
+        return Ok(pubkey.clone());
+    }
+    let k = pubkey.to_bytes();
+    let prefix: u8 = if (k[64] & 1) != 0 { 0x03 } else { 0x02 };
+    let mut key = vec![prefix];
+    key.extend(&k[1..33]);
+
+    PublicKey::from_slice(&key)
+}
+
 fn btc_encode<T, W: Write, E: Encodable>(e: &E, w: W) -> Result<usize, AppError<T>> {
     e.consensus_encode(w)
         .map_err(|e| AppError::ConsensusEncode(e))
@@ -495,6 +507,7 @@ mod tests {
     // use bitcoin::hashes::Hash;
     // use bitcoin::util::address::Payload;
     use bitcoin::Script;
+    use bitcoin::TxIn;
     use futures_await_test::async_test;
 
     use ledger_hw_transport_mock::{RecordStore, TransportReplayer};
@@ -639,38 +652,46 @@ mod tests {
         let tx: Transaction = deserialize(&raw_tx).expect("tx non valid");
         let mock = TransportReplayer::new(
             RecordStore::from_str("
-                => e042000009000000010100000001
-                <= 9000
-                => e0428000254ea60aeac5252c14291d428915bd7ccd1bfc4af009f4d4dc57ae597ed0420b71010000008a
-                <= 9000
-                => e04280003247304402201f36a12c240dbf9e566bc04321050b1984cd6eaf6caee8f02bb0bfec08e3354b022012ee2aeadcbbfd1e92959f
-                <= 9000
-                => e04280003257c15c1c6debb757b798451b104665aa3010569b49014104090b15bde569386734abf2a2b99f9ca6a50656627e77de663ca7
-                <= 9000
-                => e04280002a325702769986cf26cc9dd7fdea0af432c8e2becc867c932e1b9dd742f2a108997c2252e2bdebffffffff
-                <= 9000
-                => e04280000102
-                <= 9000
-                => e04280002281b72e00000000001976a91472a5d75c8d2d0565b656a5232703b167d50d5a2b88ac
-                <= 9000
-                => e042800022a0860100000000001976a9144533f5fb9b4817f713c48f0bfe96b9f50c476c9b88ac
-                <= 9000
-                => e04280000400000000
-                <= 32005df4c773da236484dae8f0fdba3d7e0ba1d05070d1a34fc44943e638441262a04f1001000000a086010000000000b890da969aa6f3109000
-                => e0440000050100000001
-                <= 9000
-                => e04480003b013832005df4c773da236484dae8f0fdba3d7e0ba1d05070d1a34fc44943e638441262a04f1001000000a086010000000000b890da969aa6f31019
-                <= 9000
-                => e04480001d76a9144533f5fb9b4817f713c48f0bfe96b9f50c476c9b88acffffffff
-                <= 9000
-                => e04a80002301905f0100000000001976a91472a5d75c8d2d0565b656a5232703b167d50d5a2b88ac
-                <= 00009000
-                => e04800001303800000000000000000000000000000000001
-                <= 3145022100ff492ad0b3a634aa7751761f7e063bf6ef4148cd44ef8930164580d5ba93a17802206fac94b32e296549e2e478ce806b58d61cfacbfed35ac4ceca26ac531f92b20a019000
+            => e042000009000000010100000001
+            <= 9000
+            => e0428000254ea60aeac5252c14291d428915bd7ccd1bfc4af009f4d4dc57ae597ed0420b71010000008a
+            <= 9000
+            => e04280003247304402201f36a12c240dbf9e566bc04321050b1984cd6eaf6caee8f02bb0bfec08e3354b022012ee2aeadcbbfd1e92959f
+            <= 9000
+            => e04280003257c15c1c6debb757b798451b104665aa3010569b49014104090b15bde569386734abf2a2b99f9ca6a50656627e77de663ca7
+            <= 9000
+            => e04280002a325702769986cf26cc9dd7fdea0af432c8e2becc867c932e1b9dd742f2a108997c2252e2bdebffffffff
+            <= 9000
+            => e04280000102
+            <= 9000
+            => e04280002281b72e00000000001976a91472a5d75c8d2d0565b656a5232703b167d50d5a2b88ac
+            <= 9000
+            => e042800022a0860100000000001976a9144533f5fb9b4817f713c48f0bfe96b9f50c476c9b88ac
+            <= 9000
+            => e04280000400000000
+            <= 32005df4c773da236484dae8f0fdba3d7e0ba1d05070d1a34fc44943e638441262a04f1001000000a086010000000000b890da969aa6f3109000
+            => e04000000d03800000000000000000000000
+            <= 41046666422d00f1b308fc7527198749f06fedb028b979c09f60d0348ef79c985e4138b86996b354774c434488d61c7fb20a83293ef3195d422fde9354e6cf2a74ce223137383731457244716465764c544c57424836577a6a556331454b4744517a434d41612d17bc55b7aa153ae07fba348692c2976e6889b769783d475ba7488fb547709000
+            => e0440000050100000001
+            <= 9000
+            => e04480003b013832005df4c773da236484dae8f0fdba3d7e0ba1d05070d1a34fc44943e638441262a04f1001000000a086010000000000b890da969aa6f31019
+            <= 9000
+            => e04480001d76a9144533f5fb9b4817f713c48f0bfe96b9f50c476c9b88acffffffff
+            <= 9000
+            => e04a80002301905f0100000000001976a91472a5d75c8d2d0565b656a5232703b167d50d5a2b88ac
+            <= 00009000
+            => e04800001303800000000000000000000000000000000001
+            <= 3145022100ff492ad0b3a634aa7751761f7e063bf6ef4148cd44ef8930164580d5ba93a17802206fac94b32e296549e2e478ce806b58d61cfacbfed35ac4ceca26ac531f92b20a019000
             ",
             )
             .unwrap(),
         );
+
+        let path = DerivationPath::from_str("m/0'/0/0").unwrap();
+        let (pubkey, _address, _chaincode) =
+            get_wallet_public_key(&mock, &path, false, AddressFormat::Legacy)
+                .await
+                .unwrap();
 
         let (outpoint, amount, magic_sig) = get_trusted_input(&mock, &tx, 1).await.unwrap();
 
@@ -693,22 +714,30 @@ mod tests {
 
         hash_output_full(&mock, &[&txout]).await.unwrap();
 
-        let path = DerivationPath::from_str("m/0'/0/0").unwrap();
         let sig = untrusted_hash_sign(&mock, &path, 0, SigHashType::All, None)
             .await
             .unwrap();
 
-        let mut _s: Vec<u8> = vec![sig.len() as u8];
+        let compressed_key = compress_key(&pubkey).unwrap().to_bytes();
 
-        // let target_tx: Transaction = Transaction {
-        //     lock_time: 0,
-        //     version: 1,
-        //     input: vec![TxIn {
-        //         sequence: 0,
-        //         script_sig: script_sig,
-        //         previous_output: outpoint,
-        //     }],
-        //     output: vec![txout],
-        // };
+        let mut script_sig: Vec<u8> = vec![sig.len() as u8];
+        script_sig.extend(&sig);
+        script_sig.push(compressed_key.len() as u8);
+        script_sig.extend(&compressed_key);
+
+        let target_tx: Transaction = Transaction {
+            lock_time: 0,
+            version: 1,
+            input: vec![TxIn {
+                sequence: u32::max_value(),
+                script_sig: script_sig.into(),
+                previous_output: outpoint,
+                witness: Vec::new(),
+            }],
+            output: vec![txout],
+        };
+
+        let expected_tx: Transaction = deserialize(&hex::decode("0100000001c773da236484dae8f0fdba3d7e0ba1d05070d1a34fc44943e638441262a04f10010000006b483045022100ff492ad0b3a634aa7751761f7e063bf6ef4148cd44ef8930164580d5ba93a17802206fac94b32e296549e2e478ce806b58d61cfacbfed35ac4ceca26ac531f92b20a0121026666422d00f1b308fc7527198749f06fedb028b979c09f60d0348ef79c985e41ffffffff01905f0100000000001976a91472a5d75c8d2d0565b656a5232703b167d50d5a2b88ac00000000").unwrap()).unwrap();
+        assert_eq!(expected_tx, target_tx);
     }
 }
