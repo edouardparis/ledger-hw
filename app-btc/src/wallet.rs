@@ -59,14 +59,17 @@ pub async fn get_wallet_public_key<T: Transport + Sync>(
         if let Some((&address_length, address_bytes)) =
             pk_bytes.split_off(pk_length as usize).split_first()
         {
-            let pk = PublicKey::from_slice(&pk_bytes).map_err(|_| AppError::Deserialization)?;
+            let pk = PublicKey::from_slice(&pk_bytes)
+                .map_err(|e| AppError::Deserialization(e.to_string()))?;
 
             let mut address_bytes = address_bytes.to_vec();
             let chaincode_bytes = address_bytes.split_off(address_length as usize);
             let chaincode = ChainCode::from(&chaincode_bytes[..]);
 
-            let address_str = from_utf8(&address_bytes).map_err(|_| AppError::Deserialization)?;
-            let address = Address::from_str(address_str).map_err(|_| AppError::Deserialization)?;
+            let address_str =
+                from_utf8(&address_bytes).map_err(|e| AppError::Deserialization(e.to_string()))?;
+            let address = Address::from_str(address_str)
+                .map_err(|e| AppError::Deserialization(e.to_string()))?;
 
             return Ok((pk, address, chaincode));
         }
