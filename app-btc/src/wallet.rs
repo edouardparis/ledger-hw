@@ -30,10 +30,7 @@ pub struct DeviceSig {
     pub sig: [u8; 8],
 }
 
-// path a BIP 32 path
-// verify (boolean) will ask user to confirm the address on the device
-// format ("legacy" | "p2sh" | "bech32") to use different bitcoin address formatter
-// returns (public_key, bitcoin_address, chaincode)
+/// This command returns the public key and Base58 encoded address for the given BIP 32 path.
 pub async fn get_wallet_public_key<T: Transport + Sync>(
     transport: &T,
     path: &DerivationPath,
@@ -78,6 +75,8 @@ pub async fn get_wallet_public_key<T: Transport + Sync>(
     Err(AppError::Unexpected)
 }
 
+/// This command is used to extract a Trusted Input
+/// (encrypted transaction hash, output index, output amount) from a transaction.
 pub async fn get_trusted_input<T: Transport + Sync>(
     transport: &T,
     transaction: &Transaction,
@@ -194,6 +193,11 @@ pub fn ledger_decode_outpoint(data: &[u8; 56]) -> Result<(OutPoint, u64, DeviceS
     ))
 }
 
+/// This command is used to compose an opaque SHA-256 hash for a new transaction.
+/// This transaction can be verified by the user and using transaction rules according to the
+/// current dongle operation mode.
+/// If a new transaction is started, a VERIFY PIN command shall have been issued previously to
+/// unlock the dongle at least once following the dongle power up
 pub async fn start_untrusted_hash_transaction_input<T: Transport + Sync>(
     transport: &T,
     new_tx: bool,
@@ -391,6 +395,10 @@ pub async fn finalize_input<T: Transport + Sync>(
     Ok(res)
 }
 
+/// This command is used to sign a given secure hash using a private key
+/// (after re-hashing it following the standard Bitcoin signing process) to finalize a transaction input signing process.
+/// This command will be rejected if the transaction signing state is not consistent
+/// or if a user validation is required and the provided user validation code is not correct.
 pub async fn untrusted_hash_sign<T: Transport + Sync>(
     transport: &T,
     path: &DerivationPath,
@@ -419,6 +427,10 @@ pub async fn untrusted_hash_sign<T: Transport + Sync>(
     Ok(res)
 }
 
+/// This command is used to sign message using a private key. If not paired with a secure screen,
+/// the message must be maximum 140 bytes long and ASCII printable (each byte of the message must be between 0x20 and 0x7e, both included)
+/// If not paired to a secure screen, the message it typed by the dongle along
+/// with a single usage transaction PIN when it’s power cycled. Otherwise the message can be reviewed by the user.
 pub async fn sign_message<T: Transport + Sync>(
     transport: &T,
     path: &DerivationPath,
