@@ -11,7 +11,7 @@ documentation = "https://docs.rs/ledger-hw-app-btc/"
 
 [dependencies]
 async-trait = "0.1.24"
-ledger-hw = { path = "../ledger"}
+ledger-hw = "0.0.1"
 
 [dev-dependencies]
 futures-await-test = "0.3.0"
