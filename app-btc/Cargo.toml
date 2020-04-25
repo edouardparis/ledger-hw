@@ -17,9 +17,9 @@ ledger-hw-transport = { path = "../transport"}
 [dev-dependencies]
 futures-await-test = "0.3.0"
 hex = "0.4.2"
-ledger-hw-transport-mock = { path = "../transport-mock"}
 bitcoin = "0.23.0"
 hidapi = { version = "1.2.0", default-features = false, features = ["linux-static-hidraw"] }
-ledger-hw-transport = { path = "../transport" }
-ledger-hw-transport-hid = { path = "../transport-hid" }
+ledger-hw-transport = "0.0.1"
+ledger-hw-transport-hid = "0.0.1"
+ledger-hw-transport-mock = "0.0.1"
 tokio = {version = "0.2.13", features = ["macros"]}
