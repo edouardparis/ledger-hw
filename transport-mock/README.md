@@ -1,5 +1,8 @@
 # transport-mock
 
+[![ledger-hw-transport-mock on crates.io](https://img.shields.io/crates/v/ledger-hw-transport-mock.svg)](https://crates.io/crates/ledger-hw-transport-mock)
+[![ledger-hw-transport-mock on docs.rs](https://docs.rs/ledger-hw-transport-mock/badge.svg)](https://docs.rs/ledger-hw-transport-mock)
+
 A mock implementation of the `ledger_hw_transport::Transport` Trait.
 
 example:

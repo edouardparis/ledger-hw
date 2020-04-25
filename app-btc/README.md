@@ -1,5 +1,8 @@
 # Helpers for the Ledger Bitcoin application [WIP]
 
+[![ledger-hw-app-btc on crates.io](https://img.shields.io/crates/v/ledger-hw-app-btc.svg)](https://crates.io/crates/ledger-hw-app-btc)
+[![ledger-hw-app-btc on docs.rs](https://docs.rs/ledger-hw-app-btc/badge.svg)](https://docs.rs/ledger-hw-app-btc)
+
 A transport implementing the `ledger_hw` trait is needed in most of the
 helpers.
 
