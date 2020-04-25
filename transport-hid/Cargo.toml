@@ -1,8 +1,12 @@
 [package]
 name = "ledger-hw-transport-hid"
-version = "0.1.0"
+version = "0.0.1"
 authors = ["Edouard Paris <m@edouard.paris>"]
+description = "Ledger hardware HID transport"
 edition = "2018"
+readme = "README.md"
+repository = "https://github.com/edouardparis/ledger-hw.git"
+documentation = "https://docs.rs/ledger-hw-app-btc/"
 
 [dependencies]
 async-trait = "0.1.24"

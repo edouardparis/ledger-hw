@@ -7,9 +7,9 @@ use std::str::FromStr;
 #[tokio::main]
 async fn main() {
     let transport = HidTransport::new().unwrap();
-    let path = bip32::DerivationPath::from_str("m/44'/0'/0'/0/0").unwrap();
+    let path = bip32::DerivationPath::from_str("m/84'/0'/0'/0/0").unwrap();
     let (pk, address, chaincode) =
-        get_wallet_public_key(&transport, &path, true, AddressFormat::Legacy)
+        get_wallet_public_key(&transport, &path, true, AddressFormat::Bech32)
             .await
             .unwrap();
     println!("pk: {}", pk);
