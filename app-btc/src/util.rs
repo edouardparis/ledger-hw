@@ -7,7 +7,7 @@ use crate::error::AppError;
 
 pub async fn get_firmware_version<T: Transport + Sync>(
     transport: &T,
-) -> Result<(bool, u8, String), AppError<T::Err>> {
+) -> Result<(bool, u8, String), AppError<T::Error>> {
     let (mut res, status) = transport
         .send(BTCHIP_CLA, BTCHIP_INS_GET_FIRMWARE_VERSION, 0x00, 0x00, &[])
         .await

@@ -3,8 +3,8 @@ use ledger_hw::Status;
 
 #[async_trait]
 pub trait Transport {
-    type Err;
-    async fn exchange(&self, req: &[u8]) -> Result<Vec<u8>, Self::Err>;
+    type Error;
+    async fn exchange(&self, req: &[u8]) -> Result<Vec<u8>, Self::Error>;
 
     // wrapper on top of exchange.
     async fn send(
@@ -14,13 +14,13 @@ pub trait Transport {
         p1: u8,
         p2: u8,
         data: &[u8],
-    ) -> Result<(Vec<u8>, Status), TransportError<Self::Err>> {
+    ) -> Result<(Vec<u8>, Status), TransportError<Self::Error>> {
         let mut request = vec![cla, ins, p1, p2, data.len() as u8];
         request.extend(data);
         let mut res = self
             .exchange(&request)
             .await
-            .map_err(|e| TransportError::Transport::<Self::Err>(e))?;
+            .map_err(|e| TransportError::Transport::<Self::Error>(e))?;
         if res.len() < 2 {
             return Err(TransportError::ResponseTooShort);
         }
@@ -53,8 +53,8 @@ mod tests {
     }
     #[async_trait]
     impl Transport for Mock {
-        type Err = MockError;
-        async fn exchange(&self, _req: &[u8]) -> Result<Vec<u8>, Self::Err> {
+        type Error = MockError;
+        async fn exchange(&self, _req: &[u8]) -> Result<Vec<u8>, Self::Error> {
             self.result.clone()
         }
     }

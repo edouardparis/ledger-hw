@@ -35,8 +35,8 @@ impl HidTransport {
 
 #[async_trait]
 impl Transport for HidTransport {
-    type Err = HidTransportError;
-    async fn exchange(&self, command: &[u8]) -> Result<Vec<u8>, Self::Err> {
+    type Error = HidTransportError;
+    async fn exchange(&self, command: &[u8]) -> Result<Vec<u8>, Self::Error> {
         let mut payload = Vec::with_capacity(command.len() as usize + 2);
         let length = (command.len() as u16).to_be_bytes();
         payload.extend_from_slice(&length);

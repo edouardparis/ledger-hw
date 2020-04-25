@@ -36,7 +36,7 @@ pub async fn get_wallet_public_key<T: Transport + Sync>(
     path: &DerivationPath,
     verify: bool,
     format: AddressFormat,
-) -> Result<(PublicKey, Address, ChainCode), AppError<T::Err>> {
+) -> Result<(PublicKey, Address, ChainCode), AppError<T::Error>> {
     let p1: u8 = if verify { 1 } else { 0 };
     let p2: u8 = match format {
         AddressFormat::Legacy => 0,
@@ -81,7 +81,7 @@ pub async fn get_trusted_input<T: Transport + Sync>(
     transport: &T,
     transaction: &Transaction,
     index: usize,
-) -> Result<(OutPoint, u64, DeviceSig), AppError<T::Err>> {
+) -> Result<(OutPoint, u64, DeviceSig), AppError<T::Error>> {
     // First Exchange:
     // - index    (4 bytes)
     // - version  (consensus)
@@ -206,7 +206,7 @@ pub async fn start_untrusted_hash_transaction_input<T: Transport + Sync>(
     inputs: &[(&OutPoint, u32, u64, Option<DeviceSig>)],
     redeem_script: &Script,
     have_segwit: bool,
-) -> Result<(), AppError<T::Err>> {
+) -> Result<(), AppError<T::Error>> {
     let mut data: Vec<u8> = Vec::new();
     btc_encode(&version, &mut data)?;
     btc_encode(&VarInt(inputs.len() as u64), &mut data)?;
@@ -218,7 +218,8 @@ pub async fn start_untrusted_hash_transaction_input<T: Transport + Sync>(
         }
     } else {
         if have_segwit {
-            0x10
+            // 0x01 ?
+            0x80
         } else {
             0x80
         }
@@ -257,7 +258,7 @@ pub async fn start_untrusted_hash_transaction_input<T: Transport + Sync>(
 
         let script = redeem_script.as_bytes();
 
-        if i == input_idx {
+        if i == input_idx && script.len() != 0 {
             btc_encode(&VarInt(script.len() as u64), &mut data)?;
         } else {
             data.push(0x00);
@@ -294,7 +295,7 @@ pub async fn start_untrusted_hash_transaction_input<T: Transport + Sync>(
 pub async fn provide_output_full_change_path<T: Transport + Sync>(
     transport: &T,
     path: &DerivationPath,
-) -> Result<(), AppError<T::Err>> {
+) -> Result<(), AppError<T::Error>> {
     let data = path_to_be_bytes(path);
     let (_, status) = transport
         .send(
@@ -313,7 +314,7 @@ pub async fn provide_output_full_change_path<T: Transport + Sync>(
 pub async fn hash_output_full<T: Transport + Sync>(
     transport: &T,
     outputs: &[&TxOut],
-) -> Result<(), AppError<T::Err>> {
+) -> Result<(), AppError<T::Error>> {
     let mut data: Vec<u8> = Vec::new();
     btc_encode(&VarInt(outputs.len() as u64), &mut data)?;
     for output in outputs.iter() {
@@ -341,7 +342,7 @@ pub async fn hash_output_full<T: Transport + Sync>(
 pub async fn finalize_input_full<T: Transport + Sync>(
     transport: &T,
     outputs: &[&TxOut],
-) -> Result<Vec<u8>, AppError<T::Err>> {
+) -> Result<Vec<u8>, AppError<T::Error>> {
     let mut data: Vec<u8> = Vec::new();
     btc_encode(&VarInt(outputs.len() as u64), &mut data)?;
     for output in outputs.iter() {
@@ -372,7 +373,7 @@ pub async fn finalize_input<T: Transport + Sync>(
     address: &Address,
     amount: u64,
     fee: u64,
-) -> Result<Vec<u8>, AppError<T::Err>> {
+) -> Result<Vec<u8>, AppError<T::Error>> {
     let a = address.to_string();
     let addr = a.as_bytes();
     let mut data: Vec<u8> = vec![addr.len() as u8];
@@ -405,7 +406,7 @@ pub async fn untrusted_hash_sign<T: Transport + Sync>(
     lock_time: u32,
     sighash_type: SigHashType,
     pin: Option<String>,
-) -> Result<Vec<u8>, AppError<T::Err>> {
+) -> Result<Vec<u8>, AppError<T::Error>> {
     let mut data: Vec<u8> = path_to_be_bytes(path);
     if let Some(p) = pin {
         let pin_bytes = p.into_bytes();
@@ -435,7 +436,7 @@ pub async fn sign_message<T: Transport + Sync>(
     transport: &T,
     path: &DerivationPath,
     message: &[u8],
-) -> Result<(u8, Vec<u8>, Vec<u8>), AppError<T::Err>> {
+) -> Result<(u8, Vec<u8>, Vec<u8>), AppError<T::Error>> {
     let mut data: Vec<u8> = path_to_be_bytes(path);
     data.extend(&(message.len() as u16).to_be_bytes());
     data.extend(message);
@@ -454,7 +455,7 @@ pub async fn sign_message<T: Transport + Sync>(
 
 pub async fn sign_message_sign<T: Transport + Sync>(
     transport: &T,
-) -> Result<(u8, Vec<u8>, Vec<u8>), AppError<T::Err>> {
+) -> Result<(u8, Vec<u8>, Vec<u8>), AppError<T::Error>> {
     let end: Vec<u8> = vec![0x00];
     let (res, status) = transport
         .send(BTCHIP_CLA, BTCHIP_INS_SIGN_MESSAGE, 0x80, 0x00, &end)

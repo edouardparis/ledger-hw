@@ -46,8 +46,8 @@ impl TransportReplayer {
 
 #[async_trait]
 impl Transport for TransportReplayer {
-    type Err = MockError;
-    async fn exchange(&self, command: &[u8]) -> Result<Vec<u8>, Self::Err> {
+    type Error = MockError;
+    async fn exchange(&self, command: &[u8]) -> Result<Vec<u8>, Self::Error> {
         for exchange in &self.store.queue {
             if command == exchange.0.as_slice() {
                 return Ok(exchange.1.clone());
