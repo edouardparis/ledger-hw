@@ -22,7 +22,7 @@ async fn main() {
     println!("pk: {}", pk);
     println!("address: {}", address);
     println!("chaincode: {}", chaincode);
-    }
+}
 ```
 
 TODO:
