@@ -5,6 +5,7 @@ authors = ["Edouard Paris <m@edouard.paris>"]
 description = "Helpers for Ledger Bitcoin app"
 edition = "2018"
 readme = "README.md"
+license = "MIT"
 repository = "https://github.com/edouardparis/ledger-hw.git"
 documentation = "https://docs.rs/ledger-hw-app-btc/"
 

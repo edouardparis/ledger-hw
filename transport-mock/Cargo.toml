@@ -1,10 +1,11 @@
 [package]
 name = "ledger-hw-transport-mock"
-version = "0.1.0"
+version = "0.0.1"
 authors = ["Edouard Paris <m@edouard.paris>"]
 description = "Ledger hardware Mock transport"
 edition = "2018"
 readme = "README.md"
+license = "MIT"
 repository = "https://github.com/edouardparis/ledger-hw.git"
 documentation = "https://docs.rs/ledger-hw-app-btc/"
 
