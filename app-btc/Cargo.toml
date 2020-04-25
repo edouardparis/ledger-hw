@@ -11,8 +11,8 @@ documentation = "https://docs.rs/ledger-hw-app-btc/"
 
 [dependencies]
 bitcoin = "0.23.0"
-ledger-hw = { path = "../ledger" }
-ledger-hw-transport = { path = "../transport"}
+ledger-hw = "0.0.1"
+ledger-hw-transport = "0.0.1"
 
 [dev-dependencies]
 futures-await-test = "0.3.0"
